@@ -1,0 +1,70 @@
+name: Windows EXE (upstream build)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Make cache file
+        run: |
+          grep 'sha256: "' ae.nimble > cache.txt
+      - name: Cache tarballs
+        id: cache-tarballs
+        uses: actions/cache@v5
+        with:
+          path: ffmpeg_sources
+          key: tarballs-${{ hashFiles('cache.txt') }}
+      - name: Homebrew
+        if: steps.cache-tarballs.outputs.cache-hit != 'true'
+        run: |
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          echo "/home/linuxbrew/.linuxbrew/bin" >> $GITHUB_PATH
+      - name: Install packages
+        if: steps.cache-tarballs.outputs.cache-hit != 'true'
+        run: brew install nim
+      - name: Download
+        if: steps.cache-tarballs.outputs.cache-hit != 'true'
+        run: nimble downloaddeps
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: deps
+          path: ffmpeg_sources/*.tar.*
+          if-no-files-found: error
+  windows:
+    runs-on: ubuntu-latest
+    needs: fan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Get ffmpeg_sources
+        uses: actions/download-artifact@v8
+        with:
+          name: deps
+          path: ffmpeg_sources
+      - name: Nim
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: "stable"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install llvm-mingw
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config nasm git
+          curl -L -o llvm-mingw.tar.xz https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64.tar.xz
+          tar xf llvm-mingw.tar.xz
+          echo "$PWD/llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64/bin" >> $GITHUB_PATH
+      - name: Build FFmpeg
+        run: nimble makeffwin
+      - name: Compile
+        run: nimble makewin && mv auto-editor.exe auto-editor-windows-x86_64.exe
+      - name: Save Windows executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: auto-editor-windows-x86_64
+          path: auto-editor-windows-x86_64.exe
+          if-no-files-found: error
